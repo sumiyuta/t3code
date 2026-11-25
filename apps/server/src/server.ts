@@ -17,6 +17,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { startBackgroundWorkspaceWork } from "./forkBackgroundWork.ts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -632,15 +633,21 @@ const layerOrchestrationApplication = Layer.merge(
 ).pipe(Layer.provideMerge(layerCheckpointStore), Layer.provideMerge(layerOrchestrationV2Runtime));
 
 const layerThreadSettlementWorker = Layer.effectDiscard(
-  ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
+  startBackgroundWorkspaceWork(
+    ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
+  ),
 ).pipe(Layer.provide(layerPullRequestService), Layer.provide(ProjectionStoreV2.layer));
 
 const layerIdleCompactionWorker = Layer.effectDiscard(
-  IdleCompactionService.make.pipe(Effect.flatMap((service) => service.start())),
+  startBackgroundWorkspaceWork(
+    IdleCompactionService.make.pipe(Effect.flatMap((service) => service.start())),
+  ),
 ).pipe(Layer.provide(ProjectionStoreV2.layer));
 
 const layerThreadPullRequestWorker = Layer.effectDiscard(
-  ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
+  startBackgroundWorkspaceWork(
+    ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
+  ),
 ).pipe(Layer.provide(layerPullRequestService));
 
 const layerProviderInstallationRefresh = Layer.effectDiscard(
@@ -705,7 +712,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.effectDiscard(
     Effect.gen(function* () {
       const service = yield* PullRequestSyncReactor.PullRequestSyncReactor;
-      yield* service.start();
+      yield* startBackgroundWorkspaceWork(service.start());
     }),
   ).pipe(
     Layer.provideMerge(PullRequestSyncReactor.layer),
@@ -715,7 +722,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   Layer.effectDiscard(
     Effect.gen(function* () {
       const service = yield* PullRequestWatchReactor.PullRequestWatchReactor;
-      yield* service.start();
+      yield* startBackgroundWorkspaceWork(service.start());
     }),
   ).pipe(
     Layer.provide(PullRequestWatchReactor.layer),

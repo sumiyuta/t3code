@@ -24,6 +24,7 @@ it("isolates fork data, provider homes, port and telemetry from the owner's envi
   assert.equal(environment.T3CODE_FORK_PROVIDER_HOME, "/owner/.t3-fork/provider-home");
   assert.equal(environment.T3CODE_DESKTOP_APP_DATA_DIR, "/owner/.t3-fork/electron");
   assert.equal(environment.T3CODE_PORT, "4874");
+  assert.equal(environment.T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED, "false");
   assert.equal(environment.T3CODE_TELEMETRY_ENABLED, "false");
   assert.equal(environment.T3CODE_OTEL_SDK_DISABLED, "true");
   assert.equal(environment.OTEL_SDK_DISABLED, "true");

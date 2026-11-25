@@ -22,6 +22,7 @@ export function forkEnvironment(
     T3CODE_DESKTOP_APP_DATA_DIR: NodePath.join(root, "electron"),
     T3CODE_HOME: NodePath.join(root, "data"),
     T3CODE_PORT: "4874",
+    T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED: "false",
     T3CODE_TELEMETRY_ENABLED: "false",
     T3CODE_OTEL_SDK_DISABLED: "true",
     OTEL_SDK_DISABLED: "true",

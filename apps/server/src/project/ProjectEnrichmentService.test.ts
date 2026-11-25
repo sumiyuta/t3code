@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import type { RepositoryIdentity } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -12,6 +13,40 @@ import * as TestClock from "effect/testing/TestClock";
 import * as ProjectEnrichment from "./ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
 import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
+
+it.effect("lists imported projects without resolving any workspace when disabled", () =>
+  Effect.gen(function* () {
+    // Any resolver call would fail, including explicit refresh and invalidation.
+    const service = yield* ProjectEnrichment.make();
+    const root = "/must-not-read/imported-project";
+    assert.deepStrictEqual(yield* service.getAvailable(root), {
+      repositoryIdentity: null,
+      faviconPath: null,
+      repositoryIdentityResolved: true,
+    });
+    yield* service.request(root);
+    yield* service.invalidate([root]);
+    yield* service.refreshRepositoryIdentity(root);
+    assert.isNull(yield* service.readRepositoryIdentity(root));
+    assert.isNull((yield* service.peek(root)).faviconPath);
+  }).pipe(
+    Effect.scoped,
+    Effect.provideService(HostProcess.Environment, {
+      T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED: "false",
+    }),
+    Effect.provide(
+      Layer.merge(
+        Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+          resolve: () => Effect.die("Unexpected repository access"),
+        }),
+        Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
+          invalidate: () => Effect.die("Unexpected favicon invalidation"),
+          resolvePath: () => Effect.die("Unexpected favicon access"),
+        }),
+      ),
+    ),
+  ),
+);
 
 const identity = (workspaceRoot: string, version = 1): RepositoryIdentity => ({
   canonicalKey: `example.test/v${version}${workspaceRoot}`,

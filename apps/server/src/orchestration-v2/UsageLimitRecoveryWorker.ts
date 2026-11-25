@@ -1,6 +1,7 @@
 import { CommandId, MessageId, type OrchestrationV2Command } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import { startBackgroundWorkspaceWork } from "../forkBackgroundWork.ts";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import type { OrchestrationV2DomainEvent } from "@t3tools/contracts";
@@ -147,9 +148,11 @@ const makeSweep = Effect.gen(function* () {
 });
 
 export const layer = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const sweep = yield* makeSweep;
-    const scheduler = yield* Scheduler.Scheduler;
-    yield* scheduler.register("usage-limit-recovery", sweep());
-  }),
+  startBackgroundWorkspaceWork(
+    Effect.gen(function* () {
+      const sweep = yield* makeSweep;
+      const scheduler = yield* Scheduler.Scheduler;
+      yield* scheduler.register("usage-limit-recovery", sweep());
+    }),
+  ),
 );

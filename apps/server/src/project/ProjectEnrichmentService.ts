@@ -1,4 +1,5 @@
 import type { RepositoryIdentity } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -87,6 +88,30 @@ interface EnrichmentWorkLane {
 export const make = Effect.fn("ProjectEnrichmentService.make")(function* (
   options: ProjectEnrichmentServiceOptions = {},
 ) {
+  // Imported projects are catalog entries until explicitly opened. The Fork can
+  // list their history without probing repositories, project files or favicons.
+  if ((yield* HostProcess.Environment).T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED === "false") {
+    const changes = yield* PubSub.unbounded<ProjectEnrichmentChange>();
+    const empty: ProjectEnrichment = {
+      repositoryIdentity: null,
+      faviconPath: null,
+      repositoryIdentityResolved: true,
+    };
+    const available = Effect.succeed(empty);
+    const noIdentity = Effect.succeed(null);
+    const noop = Effect.fn("ProjectEnrichmentService.disabled")(() => Effect.void);
+    return ProjectEnrichmentService.of({
+      peek: Effect.fn("ProjectEnrichmentService.peek")(() => available),
+      request: noop,
+      getAvailable: Effect.fn("ProjectEnrichmentService.getAvailable")(() => available),
+      readRepositoryIdentity: Effect.fn("ProjectEnrichmentService.readRepositoryIdentity")(
+        () => noIdentity,
+      ),
+      invalidate: noop,
+      refreshRepositoryIdentity: noop,
+      subscribeChanges: PubSub.subscribe(changes),
+    });
+  }
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const faviconResolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
   const cacheCapacity = Math.max(1, options.cacheCapacity ?? DEFAULT_CACHE_CAPACITY);
