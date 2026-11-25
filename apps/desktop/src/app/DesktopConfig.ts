@@ -65,5 +65,8 @@ export const DesktopConfig = Config.all({
   ),
 });
 
-export const layerTest = (env: Readonly<Record<string, string | undefined>>) =>
+export const layerFromEnvironment = (env: Readonly<Record<string, string | undefined>>) =>
   ConfigProvider.layer(ConfigProvider.fromEnv({ env: compactEnv(env) }));
+
+export const layerTest = (env: Readonly<Record<string, string | undefined>>) =>
+  layerFromEnvironment(env);

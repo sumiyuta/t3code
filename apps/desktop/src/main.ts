@@ -48,6 +48,7 @@ import * as DesktopBackendPool from "./backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "./backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopNetworkInterfaces from "./backend/DesktopNetworkInterfaces.ts";
 import * as DesktopEnvironment from "./app/DesktopEnvironment.ts";
+import * as DesktopConfig from "./app/DesktopConfig.ts";
 import * as DesktopManagedPolicy from "./app/DesktopManagedPolicy.ts";
 import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
 import * as DesktopLinuxUrlHandler from "./app/DesktopLinuxUrlHandler.ts";
@@ -252,6 +253,9 @@ const layerDesktopRuntime = layerDesktopClerk.pipe(
     layerDesktopApplicationRuntime.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),
   ),
   Layer.provideMerge(DesktopPreReadyPlatform.layer),
+  Layer.provide(
+    Layer.unwrap(Effect.map(HostProcess.Environment, DesktopConfig.layerFromEnvironment)),
+  ),
 );
 
 DesktopApp.program.pipe(Effect.provide(layerDesktopRuntime), NodeRuntime.runMain);
