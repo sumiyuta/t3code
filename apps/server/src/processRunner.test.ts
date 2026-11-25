@@ -19,6 +19,8 @@ type ChildProcessCommand = {
   readonly args: ReadonlyArray<string>;
   readonly options: {
     readonly shell?: boolean | string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly extendEnv?: boolean;
   };
 };
 
@@ -79,6 +81,26 @@ const runWith =
     );
 
 describe("runProcess", () => {
+  it.effect("isolates explicit helper environments from inherited credentials", () => {
+    const spawner = makeSpawner((command) =>
+      Effect.sync(() => {
+        expect(command.options.extendEnv).toBe(false);
+        expect(command.options.env).toEqual({ PATH: "/usr/bin:/bin", LANG: "C" });
+        return makeHandle({ stdout: "unavailable" });
+      }),
+    );
+    return runWith(spawner)({
+      command: "/usr/bin/python3",
+      args: ["-I", "/test/status.py", "/test/project"],
+      env: { PATH: "/usr/bin:/bin", LANG: "C" },
+      extendEnv: false,
+    }).pipe(
+      Effect.provideService(HostProcess.Platform, "darwin"),
+      Effect.provideService(HostProcess.Environment, { UNRELATED_CREDENTIAL: "test-only" }),
+      Effect.map((result) => expect(result.stdout).toBe("unavailable")),
+    );
+  });
+
   it.effect("resolves and escapes Windows command shims before spawning", () => {
     const spawner = makeSpawner((command) =>
       Effect.sync(() => {

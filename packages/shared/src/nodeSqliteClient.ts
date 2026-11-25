@@ -35,6 +35,8 @@ export interface SqliteClientConfig {
   readonly spanAttributes?: Record<string, unknown> | undefined;
   /** Ignored for in-memory databases, which cannot share a second connection. */
   readonly readerWorker?: boolean | undefined;
+  /** Release idle spare reader workers while keeping the first reader warm. */
+  readonly reclaimIdleReaders?: boolean | undefined;
   /** Runs the writer and WAL checkpoints off the event loop. Ignored for in-memory databases. */
   readonly writerWorker?: boolean | undefined;
 }
@@ -559,7 +561,7 @@ const makeWorkerConnection = Effect.fnUntraced(function* (options: {
     void worker.terminate();
   };
 
-  return Effect.suspend((): Effect.Effect<Connection, SqlError> => {
+  const acquire = Effect.suspend((): Effect.Effect<Connection, SqlError> => {
     if (current === undefined && writerStopped !== undefined) {
       return Effect.fail(failedWith({ message: writerStopped }, "execute"));
     }
@@ -600,6 +602,12 @@ const makeWorkerConnection = Effect.fnUntraced(function* (options: {
       },
     );
   });
+  return {
+    acquire,
+    retireIdle: () => {
+      if (current) retire(current.worker);
+    },
+  };
 });
 
 const startFailure = (error: SqlError) => {
@@ -613,7 +621,11 @@ const startFailure = (error: SqlError) => {
 // A reader that cannot start turns off the whole pool, so routing never picks a dead slot, until
 // one background retry starts it again.
 const makeReader = Effect.fnUntraced(function* (filename: string, pool: { unavailable: boolean }) {
-  const acquire = yield* makeWorkerConnection({ filename, role: "reader", readOnly: true });
+  const { acquire, retireIdle } = yield* makeWorkerConnection({
+    filename,
+    role: "reader",
+    readOnly: true,
+  });
   const scope = yield* Effect.scope;
   const context = yield* Effect.context<never>();
 
@@ -640,7 +652,7 @@ const makeReader = Effect.fnUntraced(function* (filename: string, pool: { unavai
       }),
     );
 
-  return Effect.suspend((): Effect.Effect<Connection | undefined> =>
+  const acquireReader = Effect.suspend((): Effect.Effect<Connection | undefined> =>
     pool.unavailable
       ? Effect.undefined
       : acquire.pipe(
@@ -662,6 +674,7 @@ const makeReader = Effect.fnUntraced(function* (filename: string, pool: { unavai
           }),
         ),
   );
+  return { acquire: acquireReader, retireIdle };
 });
 
 // A checkpoint copies WAL pages into the database and syncs it. On the writer's thread every
@@ -924,12 +937,12 @@ const make = Effect.fn("makeWithDatabase")(function* (
   const writerWorker = options.writerWorker === true && isFileDatabase;
   let checkpointAfterWrite: (() => void) | undefined;
   const writerConnection: Effect.Effect<Connection, SqlError> = writerWorker
-    ? yield* makeWorkerConnection({
+    ? (yield* makeWorkerConnection({
         filename: options.filename,
         role: "writer",
         readOnly: options.readonly ?? false,
         onReply: () => checkpointAfterWrite?.(),
-      })
+      })).acquire
     : Effect.succeed(yield* makeConnection);
   // Opening now fails the layer for a file that is not a database, not its first query.
   const opened = yield* writerConnection;
@@ -950,14 +963,26 @@ const make = Effect.fn("makeWithDatabase")(function* (
       ? yield* Effect.forEach(Array.from({ length: READER_POOL_SIZE }), () =>
           Effect.map(
             Effect.all([makeReader(options.filename, readerPool), Semaphore.make(1)]),
-            ([acquire, lock]) => ({
-              acquire,
+            ([reader, lock]) => ({
+              ...reader,
+              idleOnLastCheck: false,
               lock,
               claimed: false,
             }),
           ),
         )
       : [];
+  if (options.reclaimIdleReaders && readers.length > 1) {
+    const spares = readers.slice(1);
+    yield* Effect.sync(() => {
+      // Recovery may acquire a worker without borrowing its slot.
+      if (readerPool.unavailable) return;
+      for (const reader of spares) {
+        if (reader.idleOnLastCheck && !reader.claimed) reader.retireIdle();
+        reader.idleOnLastCheck = !reader.claimed;
+      }
+    }).pipe(Effect.delay("1 minute"), Effect.forever, Effect.forkScoped);
+  }
   // One permit per slot, so a queued read waits for any reader, not one it picked while all were busy.
   const readerAdmission = yield* Semaphore.make(readers.length);
 
@@ -988,6 +1013,7 @@ const make = Effect.fn("makeWithDatabase")(function* (
           // Holding a permit leaves a slot idle; the lowest wins, so idle slots never start a worker.
           const reader = readers.find((slot) => !slot.claimed)!;
           reader.claimed = true;
+          reader.idleOnLastCheck = false;
           const release = Effect.andThen(
             Effect.sync(() => {
               reader.claimed = false;

@@ -1,6 +1,6 @@
 # Product analytics
 
-The server owns analytics delivery, opt-out, and identity for every connected client.
+The server requires explicit consent before collecting its telemetry identity, counting projects and threads for the startup heartbeat, or delivering product events. Desktop shell discovery delays the decision. Clients apply their own consent before adding account and device hashes to a connection.
 Clients do not load the PostHog browser SDK. Client-use events require an
 authenticated connection, so visiting the hosted app without connecting does not
 count as product use.

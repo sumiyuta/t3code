@@ -6,7 +6,12 @@ import assetLinks from "../web/public/.well-known/assetlinks.json";
 
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
-  loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
+  loadRepoEnv: () => ({
+    APP_VARIANT: process.env.APP_VARIANT,
+    T3CODE_TELEMETRY_ENABLED: process.env.T3CODE_TELEMETRY_ENABLED,
+    T3CODE_RELAY_URL: "https://relay.example.test",
+    EXPO_PUBLIC_OTLP_TRACES_TOKEN: "fixture",
+  }),
 }));
 
 afterEach(() => {
@@ -45,3 +50,16 @@ it.each([
   ]);
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
 });
+
+it.each([undefined, "false", "invalid", "true"])(
+  "gates native crash and relay endpoints for telemetry=%j",
+  async (value) => {
+    vi.stubEnv("T3CODE_TELEMETRY_ENABLED", value);
+    const { extra } = await loadConfig("production");
+    expect(extra?.relay.url).toBe("https://relay.example.test");
+    expect(extra?.eas.observe.endpointUrl).toBe(
+      value === "true" ? "https://relay.example.test/v1/mobile/observe" : "https://observe.invalid",
+    );
+    expect(extra?.observability.tracesToken).toBe(value === "true" ? "fixture" : null);
+  },
+);

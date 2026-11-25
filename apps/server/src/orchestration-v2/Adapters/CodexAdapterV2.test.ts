@@ -1590,6 +1590,10 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
         settings: DEFAULT_CODEX_SETTINGS,
         environment: {},
+        rakkoProjectCheck: {
+          launcher: "/personal/.codex/mcp-launch/rakko-launch.py",
+          unavailable: (cwd) => Effect.succeed(cwd === "/workspace"),
+        },
         clientFactory,
         ...(onUsageLimits ? { onUsageLimits } : {}),
         ...(models ? { models } : {}),
@@ -2426,97 +2430,132 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
-  it.effect("adds the session MCP server and gives stdio servers the thread id", () =>
-    Effect.gen(function* () {
-      const scenario = "launch-mcp-servers";
-      yield* (yield* McpProviderSessions.McpProviderSessions).set({
-        environmentId: EnvironmentId.make("environment-codex-mcp"),
-        threadId: ThreadId.make(`thread-${scenario}`),
-        providerSessionId: `provider-session-${scenario}`,
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        endpoint: "http://127.0.0.1:43123/mcp",
-        authorizationHeader: "Bearer secret-codex-token",
-        browserToolsAvailable: true,
-      });
-      const requests: Array<unknown> = [];
-      const preamble = codexReplayPreamble({
-        nativeThreadId: "launch-mcp-thread",
-        nativeTurnId: "unused",
-        prompt: "unused",
-      });
-      yield* makeCodexReplayHarness(
-        makeCodexReplayTranscript({
-          scenario,
-          entries: [
-            ...preamble.slice(0, 3),
-            {
-              type: "expect_outbound",
-              label: "config/read",
-              frame: { id: 2, method: "config/read", params: { includeLayers: false } },
-            },
-            {
-              type: "emit_inbound",
-              label: "config/read",
-              frame: {
-                id: 2,
-                result: {
-                  config: {
-                    mcp_servers: {
-                      envprobe: { command: "python3", env: { FOO: "bar" } },
-                      remote: { url: "https://example.com/mcp" },
-                      "dotted.name": { command: "node" },
+  it.effect.each([false, true])(
+    "tags stdio servers for preview attribution (custom launchers: %s)",
+    (custom) =>
+      Effect.gen(function* () {
+        const scenario = "launch-mcp-servers";
+        yield* (yield* McpProviderSessions.McpProviderSessions).set({
+          environmentId: EnvironmentId.make("environment-codex-mcp"),
+          threadId: ThreadId.make(`thread-${scenario}`),
+          providerSessionId: `provider-session-${scenario}`,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer secret-codex-token",
+          browserToolsAvailable: true,
+        });
+        const requests: Array<unknown> = [];
+        const preamble = codexReplayPreamble({
+          nativeThreadId: "launch-mcp-thread",
+          nativeTurnId: "unused",
+          prompt: "unused",
+        });
+        yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario,
+            entries: [
+              ...preamble.slice(0, 3),
+              {
+                type: "expect_outbound",
+                label: "config/read",
+                frame: { id: 2, method: "config/read", params: { includeLayers: false } },
+              },
+              {
+                type: "emit_inbound",
+                label: "config/read",
+                frame: {
+                  id: 2,
+                  result: {
+                    config: {
+                      mcp_servers: {
+                        "rakko-keyword": {
+                          command: "/usr/bin/python3",
+                          args: [
+                            custom
+                              ? "/custom/rakko-launch.py"
+                              : "/personal/.codex/mcp-launch/rakko-launch.py",
+                          ],
+                          env: { T3CODE_RAKKO_PROJECT_CHECK: "1" },
+                        },
+                        envprobe: { command: "python3", env: { FOO: "bar" } },
+                        "analytics-mcp": {
+                          command: custom ? "preview" : "/bin/google-analytics-mcp",
+                        },
+                        context7: {
+                          command: "/bin/node",
+                          args: [
+                            custom
+                              ? "/preview.js"
+                              : "/opt/node_modules/@upstash/context7-mcp/dist/index.js",
+                          ],
+                        },
+                        "analytics-mcp-dev": { command: "/bin/google-analytics-mcp" },
+                        xcodebuildmcp: { command: "node" },
+                        remote: { url: "https://example.com/mcp" },
+                        "dotted.name": { command: "node" },
+                      },
                     },
+                    origins: {},
                   },
-                  origins: {},
                 },
               },
-            },
-            ...preamble.slice(3, 5).map((entry) => withReplayRequestId(entry, 3)),
-          ],
-        }),
-        () => Effect.void,
-        (method, params) =>
-          Effect.sync(() => {
-            if (method === "thread/start") requests.push(params);
+              ...preamble.slice(3, 5).map((entry) => withReplayRequestId(entry, 3)),
+            ],
           }),
-      );
-      assert.deepEqual(requests, [
-        {
-          cwd: "/workspace",
-          model: "gpt-5.4",
-          config: {
-            "tools.update_plan.enabled": true,
-            mcp_optional_startup_grace_ms: 10_000,
-            "features.concurrent_reasoning_summaries": true,
-            "shell_environment_policy.set.T3CODE_THREAD_ID": `thread-${scenario}`,
-            "mcp_servers.envprobe.env.T3CODE_THREAD_ID": `thread-${scenario}`,
-            "mcp_servers.t3-code": {
-              url: "http://127.0.0.1:43123/mcp",
-              tool_timeout_sec: 3_900,
-              http_headers: { Authorization: "Bearer secret-codex-token" },
-              disabled_tools: ["t3_thread_wait", "delegate_task"],
-            },
-            "mcp_servers.t3-code-direct": {
-              url: "http://127.0.0.1:43123/mcp",
-              tool_timeout_sec: 3_900,
-              http_headers: { Authorization: "Bearer secret-codex-token" },
-              enabled_tools: ["t3_thread_wait", "delegate_task"],
-              omit_tools_from: ["code_mode", "deferred"],
+          () => Effect.void,
+          (method, params) =>
+            Effect.sync(() => {
+              if (method === "thread/start") requests.push(params);
+            }),
+        );
+        assert.deepEqual(requests, [
+          {
+            cwd: "/workspace",
+            model: "gpt-5.4",
+            config: {
+              "tools.update_plan.enabled": true,
+              mcp_optional_startup_grace_ms: 10_000,
+              "features.concurrent_reasoning_summaries": true,
+              "shell_environment_policy.set.T3CODE_THREAD_ID": `thread-${scenario}`,
+              ...(custom
+                ? { "mcp_servers.rakko-keyword.env.T3CODE_THREAD_ID": `thread-${scenario}` }
+                : { "mcp_servers.rakko-keyword.enabled": false }),
+              "mcp_servers.envprobe.env.T3CODE_THREAD_ID": `thread-${scenario}`,
+              "mcp_servers.analytics-mcp-dev.env.T3CODE_THREAD_ID": `thread-${scenario}`,
+              "mcp_servers.xcodebuildmcp.env.T3CODE_THREAD_ID": `thread-${scenario}`,
+              ...(custom
+                ? {
+                    "mcp_servers.analytics-mcp.env.T3CODE_THREAD_ID": `thread-${scenario}`,
+                    "mcp_servers.context7.env.T3CODE_THREAD_ID": `thread-${scenario}`,
+                  }
+                : {}),
+              "mcp_servers.t3-code": {
+                url: "http://127.0.0.1:43123/mcp",
+                tool_timeout_sec: 3_900,
+                http_headers: { Authorization: "Bearer secret-codex-token" },
+                disabled_tools: ["t3_thread_wait", "delegate_task"],
+              },
+              "mcp_servers.t3-code-direct": {
+                url: "http://127.0.0.1:43123/mcp",
+                tool_timeout_sec: 3_900,
+                http_headers: { Authorization: "Bearer secret-codex-token" },
+                enabled_tools: ["t3_thread_wait", "delegate_task"],
+                omit_tools_from: ["code_mode", "deferred"],
+              },
             },
           },
-        },
-      ]);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(
-          IdAllocator.layer,
-          McpProviderSessions.layer,
-          NodeServices.layer,
-          NodeCrypto.layer,
+        ]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       ),
-    ),
   );
 
   // regression: #36520 MCP servers can tell a delegate_task child from a user thread

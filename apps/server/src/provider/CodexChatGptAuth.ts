@@ -287,17 +287,20 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
       ),
     ),
     // The OpenAI account is the person, so it marks who owns this install.
-    Effect.tap((credentials) => {
-      const userId = Option.flatMap(credentials, (saved) =>
-        Option.flatMap(Option.fromUndefinedOr(saved.idToken), openAiUserId),
-      );
-      return Option.isSome(userId) && Option.isSome(analytics)
-        ? analytics.value.recordOwners(
+    Effect.tap(
+      Effect.fnUntraced(function* (credentials) {
+        if (Option.isNone(analytics) || !(yield* analytics.value.enabled)) return;
+        const userId = Option.flatMap(credentials, (saved) =>
+          Option.flatMap(Option.fromUndefinedOr(saved.idToken), openAiUserId),
+        );
+        if (Option.isSome(userId)) {
+          yield* analytics.value.recordOwners(
             [{ source: "openai", ownerId: hashTelemetryId(userId.value) }],
             "server",
-          )
-        : Effect.void;
-    }),
+          );
+        }
+      }),
+    ),
   );
   const writeSessions = (saved: typeof Sessions.Type) =>
     encodeSessions(saved).pipe(

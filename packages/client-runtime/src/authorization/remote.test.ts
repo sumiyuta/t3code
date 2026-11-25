@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { EnvironmentAuthInvalidError } from "@t3tools/contracts";
 import { hashTelemetryId } from "@t3tools/shared/telemetryId";
 import {
+  readClientOwnerParams,
   bootstrapRemoteBearerSession,
   exchangeRemoteDpopAccessToken,
   issueRemoteDpopWebSocketTicket,
@@ -314,6 +315,22 @@ describe("remote environment authorization", () => {
     }),
   );
 
+  it.effect("skips account and device lookups without client consent", () =>
+    Effect.gen(function* () {
+      const owners = yield* readClientOwnerParams.pipe(
+        Effect.provideService(ClientCapabilities.AnalyticsDevice, {
+          enabled: Effect.succeed(false),
+          id: Effect.die("unexpected device lookup"),
+        }),
+        Effect.provideService(ClientCapabilities.CloudSession, {
+          identity: Effect.die("unexpected account lookup"),
+          clerkToken: Effect.succeed("unused"),
+        }),
+      );
+      expect(owners).toEqual({});
+    }),
+  );
+
   it.effect("names the signed-in Connect account and this device by hash only", () =>
     Effect.gen(function* () {
       const fetch = recordedFetch(
@@ -335,6 +352,7 @@ describe("remote environment authorization", () => {
             }),
           ),
           Effect.provideService(ClientCapabilities.AnalyticsDevice, {
+            enabled: Effect.succeed(true),
             id: Effect.succeedSome("device-1"),
           }),
         ),

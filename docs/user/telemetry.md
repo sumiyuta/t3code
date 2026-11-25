@@ -1,6 +1,6 @@
 # Product usage data
 
-The T3 Code server sends product usage events to T3 Code's own endpoint at `ingest.t3.codes`,
+In this fork, product usage reporting is off by default. When enabled, the server sends product usage events to T3 Code's own endpoint at `ingest.t3.codes`,
 associated with a hashed account or installation identifier. To count how many installations one person
 uses, the server also sends hashed account identifiers: your T3 Connect account, your OpenAI and
 Claude accounts when you are signed in, and a random identifier for each device that connects. The endpoint keeps a copy of each
@@ -14,13 +14,13 @@ raw provider events, or child-agent output.
 
 ## Relay connection diagnostics
 
-T3 Code sends relay connection traces to Axiom to diagnose T3 Connect connectivity. These are
+With telemetry enabled and a relay exporter configured, T3 Code sends relay connection traces to Axiom to diagnose T3 Connect connectivity. These are
 separate from product events. Depending on the client version, traces can include connection
 timings, environment identifiers and the connected machine's name. Failed spans can include error
 messages and stack traces; error text can quote a value the app was handling.
 
-To disable product events and relay tracing from the server, set
-`T3CODE_TELEMETRY_ENABLED=false` in its environment before starting it. Relay tracing also stops
+To enable product events and allow relay tracing from the server, set
+`T3CODE_TELEMETRY_ENABLED=true` in its environment before starting it. Relay tracing also stops
 when `T3CODE_OTEL_SDK_DISABLED` or `OTEL_SDK_DISABLED` turns OpenTelemetry export off.
 
 An administrator can turn product events and relay tracing off in the server and desktop app with
@@ -31,12 +31,11 @@ The desktop app reads `T3CODE_TELEMETRY_ENABLED` from your shell profile (for ex
 Linux, so export it there and restart the app. On Windows, set it as a user environment variable.
 
 The web app in a browser, including one the `t3` CLI opens, does not read these environment
-variables. When its build has relay tracing configured, it sends its own connection traces even
-if the server has opted out. The browser app has no relay tracing toggle.
+variables. A browser build sends relay traces only with `VITE_T3CODE_TELEMETRY_ENABLED=true` and a configured exporter. The same client preference gates account and device hashes added to connections. A desktop renderer waits for its host’s decision.
 
 ## Mobile app diagnostics
 
-When the iOS or Android app crashes or hits an error, it sends a report to T3 Code: the error
+Mobile builds omit the vendor tracing configuration and use an unreachable native crash endpoint by default. To include mobile diagnostics, build with `T3CODE_TELEMETRY_ENABLED=true`. In a build with diagnostics and a configured relay, when the iOS or Android app crashes or hits an error, it sends a report to T3 Code: the error
 message, the stack trace, the app version, and the device model and OS version. Each launch also
 sends startup timings, and every report carries a random ID for the install. Reports go through
 the T3 Connect relay to Axiom. They do not include your threads, prompts, or connection details,

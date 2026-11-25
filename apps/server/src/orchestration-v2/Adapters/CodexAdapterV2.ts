@@ -1,4 +1,5 @@
 import { pipe } from "effect/Function";
+import * as ProcessRunner from "../../processRunner.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import { brokenRuntimeError } from "../../provider/providerCompatibility.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
@@ -99,6 +100,7 @@ import * as Function from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -1508,25 +1510,55 @@ const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 const CODEX_T3_DIRECT_MCP_SERVER = "t3-code-direct";
 const CODEX_DIRECT_ONLY_T3_TOOLS = ["t3_thread_wait", "delegate_task"];
 
-/** Names of the stdio MCP servers in a `config/read` config, the ones Codex starts per thread. */
-function codexStdioMcpServerNames(mcpServers: unknown): ReadonlyArray<string> {
+/** Servers whose child processes need a thread ID for preview port attribution. */
+function threadTaggedStdioMcpServerNames(mcpServers: unknown): ReadonlyArray<string> {
   if (mcpServers === null || typeof mcpServers !== "object") return [];
   return Object.entries(mcpServers)
-    .filter(
-      ([name, server]) =>
-        // Codex splits config override keys on every dot.
-        !name.includes(".") &&
-        server !== null &&
-        typeof server === "object" &&
-        typeof Reflect.get(server, "command") === "string",
-    )
+    .filter(([name, server]) => {
+      // Codex splits config override keys on every dot.
+      if (name.includes(".") || typeof server?.command !== "string") return false;
+      const command = server.command.split("/").at(-1);
+      const args: unknown = server.args ?? [];
+      // Stable launcher settings let Codex reuse the catalog without starting an unused MCP.
+      if (name === "analytics-mcp" && command === "google-analytics-mcp") {
+        return !Array.isArray(args) || args.length !== 0;
+      }
+      return !(
+        name === "context7" &&
+        command === "node" &&
+        Array.isArray(args) &&
+        args.length === 1 &&
+        typeof args[0] === "string" &&
+        args[0].endsWith("/node_modules/@upstash/context7-mcp/dist/index.js")
+      );
+    })
     .map(([name]) => name);
+}
+
+type ThreadStdioServers = {
+  readonly tagged: ReadonlyArray<string>;
+  readonly disableRakko: boolean;
+};
+
+function matchesProjectScopedRakko(servers: unknown, launcher: string): boolean {
+  if (!Predicate.isObject(servers)) return false;
+  const server = servers["rakko-keyword"];
+  return (
+    Predicate.isObject(server) &&
+    server.enabled !== false &&
+    server.command === "/usr/bin/python3" &&
+    Array.isArray(server.args) &&
+    server.args.length === 1 &&
+    server.args[0] === launcher &&
+    Predicate.isObject(server.env) &&
+    server.env.T3CODE_RAKKO_PROJECT_CHECK === "1"
+  );
 }
 
 function codexThreadRuntimeParams(input: {
   readonly threadId: ThreadId | null;
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
-  readonly stdioMcpServers?: ReadonlyArray<string>;
+  readonly stdioMcpServers?: ThreadStdioServers;
   readonly modelSelection?: { readonly model: string };
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
 }): {
@@ -1548,6 +1580,9 @@ function codexThreadRuntimeParams(input: {
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
+      ...(input.stdioMcpServers?.disableRakko
+        ? { "mcp_servers.rakko-keyword.enabled": false }
+        : {}),
       // One app-server serves many threads, so the id goes in per-thread shell config, not its env.
       ...(input.threadId === null
         ? {}
@@ -1555,7 +1590,7 @@ function codexThreadRuntimeParams(input: {
             [`shell_environment_policy.set.${PortScanner.AGENT_THREAD_ENV}`]: input.threadId,
             // Codex starts the user's stdio MCP servers per thread, outside the shell policy.
             ...Object.fromEntries(
-              (input.stdioMcpServers ?? []).map((name) => [
+              (input.stdioMcpServers?.tagged ?? []).map((name) => [
                 `mcp_servers.${name}.env.${PortScanner.AGENT_THREAD_ENV}`,
                 input.threadId,
               ]),
@@ -1849,6 +1884,7 @@ export const layerAppServerClientFactory: Layer.Layer<
 );
 
 export type CodexAdapterV2DriverEnv =
+  | ChildProcessSpawner.ChildProcessSpawner
   | CodexAppServerClientFactory
   | Digest.Digest
   | FileSystem.FileSystem
@@ -1874,6 +1910,10 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
   const portDiscovery = yield* PortScanner.PortDiscovery;
   const serverConfig = yield* ServerConfig;
   const homeLayout = yield* resolveCodexHomeLayout(config);
+  const home = yield* HostProcess.HomeDirectory;
+  const path = yield* Path.Path;
+  const runner = yield* ProcessRunner.make();
+  const launcherDir = path.join(home, ".codex", "mcp-launch");
 
   yield* materializeCodexShadowHome(homeLayout).pipe(
     Effect.mapError(
@@ -1898,6 +1938,24 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
   return yield* makeCodexAdapterV2({
     instanceId,
     settings,
+    rakkoProjectCheck: {
+      launcher: path.join(launcherDir, "rakko-launch.py"),
+      unavailable: (cwd) =>
+        runner
+          .run({
+            command: "/usr/bin/python3",
+            args: ["-I", path.join(launcherDir, "rakko-project-status.py"), cwd],
+            cwd: home,
+            env: { HOME: home, PATH: "/usr/bin:/bin", LANG: "C" },
+            extendEnv: false,
+            timeout: "3 seconds",
+            maxOutputBytes: 1024,
+          })
+          .pipe(
+            Effect.map((result) => result.code === 0 && result.stdout.trim() === "unavailable"),
+            Effect.orElseSucceed(() => false),
+          ),
+    },
     environment: yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
     clientFactory,
     digest,
@@ -1911,6 +1969,10 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
 });
 
 export interface CodexAdapterV2Options {
+  readonly rakkoProjectCheck?: {
+    readonly launcher: string;
+    readonly unavailable: (cwd: string) => Effect.Effect<boolean>;
+  };
   readonly instanceId: ProviderInstanceId;
   readonly settings: CodexSettings;
   readonly environment: NodeJS.ProcessEnv;
@@ -2092,21 +2154,50 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         // A failed open is discarded, so the next turn spawns the updated binary.
         if (adapterOptions.compatibility !== undefined) yield* ensureInitialized;
         // Read per thread: a workspace's project config can add its own servers.
-        const readStdioMcpServers = (cwd: string | null | undefined) =>
-          ensureInitialized.pipe(
-            Effect.andThen(
-              client.request("config/read", {
-                ...(cwd == null ? {} : { cwd }),
-                includeLayers: false,
-              }),
+        const readStdioMcpServers = Effect.fn("CodexAdapterV2.readStdioMcpServers")(
+          function* (cwd: string | null | undefined, nativeThreadId?: string) {
+            yield* ensureInitialized;
+            const read = (directory: string | null | undefined) =>
+              client
+                .request("config/read", {
+                  ...(directory == null ? {} : { cwd: directory }),
+                  includeLayers: false,
+                })
+                .pipe(Effect.map((response) => response.config.mcp_servers));
+            let directory = cwd;
+            let servers = yield* read(directory);
+            const check = adapterOptions.rakkoProjectCheck;
+            // A resumed or forked thread can inherit its saved cwd from Codex.
+            if (
+              !directory &&
+              nativeThreadId &&
+              check &&
+              matchesProjectScopedRakko(servers, check.launcher)
+            ) {
+              directory = yield* client
+                .request("thread/read", { threadId: nativeThreadId, includeTurns: false })
+                .pipe(
+                  Effect.map((response) => response.thread.cwd),
+                  Effect.orElseSucceed(() => undefined),
+                );
+              if (directory) servers = yield* read(directory);
+            }
+            const disableRakko =
+              directory && check && matchesProjectScopedRakko(servers, check.launcher)
+                ? yield* check.unavailable(directory)
+                : false;
+            const tagged = threadTaggedStdioMcpServerNames(servers);
+            return {
+              tagged: disableRakko ? tagged.filter((name) => name !== "rakko-keyword") : tagged,
+              disableRakko,
+            };
+          },
+          Effect.catch(() =>
+            Effect.logDebug("Codex config read failed.").pipe(
+              Effect.as<ThreadStdioServers>({ tagged: [], disableRakko: false }),
             ),
-            Effect.map((response) => codexStdioMcpServerNames(response.config.mcp_servers)),
-            Effect.catch(() =>
-              Effect.logDebug("Codex config read failed.").pipe(
-                Effect.as<ReadonlyArray<string>>([]),
-              ),
-            ),
-          );
+          ),
+        );
         const now = yield* DateTime.now;
         const session = providerSession({
           providerSessionId: input.providerSessionId,
@@ -7840,7 +7931,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             Effect.catchIf(isCodexThreadNotFoundError, () =>
               Effect.all([
                 readMcpSession(providerThread.appThreadId),
-                readStdioMcpServers(undefined),
+                readStdioMcpServers(undefined, threadId),
               ]).pipe(
                 Effect.flatMap(([mcpSession, stdioMcpServers]) =>
                   resumeNativeThread(threadId, {
@@ -8061,7 +8152,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ...codexThreadRuntimeParams({
                   threadId: appThreadId,
                   mcpSession: yield* readMcpSession(appThreadId),
-                  stdioMcpServers: yield* readStdioMcpServers(threadInput.runtimePolicy?.cwd),
+                  stdioMcpServers: yield* readStdioMcpServers(
+                    threadInput.runtimePolicy?.cwd,
+                    nativeThreadId,
+                  ),
                   ...(threadInput.modelSelection === undefined
                     ? {}
                     : { modelSelection: threadInput.modelSelection }),
@@ -8959,7 +9053,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...codexThreadRuntimeParams({
                     threadId: threadInput.providerThread.appThreadId,
                     mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
-                    stdioMcpServers: yield* readStdioMcpServers(undefined),
+                    stdioMcpServers: yield* readStdioMcpServers(undefined, threadId),
                   }),
                 });
               }
@@ -9008,7 +9102,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ...codexThreadRuntimeParams({
                   threadId: threadInput.targetThreadId,
                   mcpSession: yield* mcpSessions.read(threadInput.targetThreadId),
-                  stdioMcpServers: yield* readStdioMcpServers(threadInput.runtimePolicy?.cwd),
+                  stdioMcpServers: yield* readStdioMcpServers(
+                    threadInput.runtimePolicy?.cwd,
+                    threadId,
+                  ),
                   ...(threadInput.modelSelection === undefined
                     ? {}
                     : { modelSelection: threadInput.modelSelection }),

@@ -1,3 +1,4 @@
+import { relayTelemetryEnabled } from "../cloud/publicConfig";
 import { msg } from "gt-react";
 import {
   ClientCapabilities,
@@ -352,6 +353,7 @@ const ANALYTICS_DEVICE_ID_KEY = "t3code:analytics-device-id";
 
 // Lives as long as this browser profile's site data. Storage can be blocked, which only drops the id.
 const analyticsDevice = {
+  enabled: Effect.sync(() => relayTelemetryEnabled() === true),
   id: Effect.sync(
     Option.liftThrowable(() => {
       const existing = window.localStorage.getItem(ANALYTICS_DEVICE_ID_KEY);

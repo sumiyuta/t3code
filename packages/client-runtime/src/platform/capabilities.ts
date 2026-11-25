@@ -46,9 +46,10 @@ export class RelayDeviceIdentity extends Context.Service<
  * in analytics even when nobody is signed in.
  */
 export class AnalyticsDevice extends Context.Reference<{
+  readonly enabled: Effect.Effect<boolean>;
   readonly id: Effect.Effect<Option.Option<string>>;
 }>("@t3tools/client-runtime/platform/capabilities/AnalyticsDevice", {
-  defaultValue: () => ({ id: Effect.succeedNone }),
+  defaultValue: () => ({ enabled: Effect.succeed(false), id: Effect.succeedNone }),
 }) {}
 
 export class ClientPresentation extends Context.Service<

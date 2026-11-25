@@ -56,6 +56,7 @@ vi.mock("node:worker_threads", async (importOriginal) => {
 
 const withReaderClient = <A, E>(
   use: (sql: SqlClient.SqlClient) => Effect.Effect<A, E, SqlClient.SqlClient>,
+  reclaimIdleReaders = false,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -68,7 +69,9 @@ const withReaderClient = <A, E>(
       yield* sql`CREATE TABLE entries(name TEXT NOT NULL)`;
       yield* sql`INSERT INTO entries VALUES ('first')`;
       return yield* use(sql);
-    }).pipe(Effect.provide(SqliteClient.layer({ filename, readerWorker: true })));
+    }).pipe(
+      Effect.provide(SqliteClient.layer({ filename, readerWorker: true, reclaimIdleReaders })),
+    );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 const countEntries = (sql: SqlClient.SqlClient) =>
@@ -484,6 +487,60 @@ it.effect("serves another read while a read-only transaction is open", () =>
         )
         .pipe(SqliteClient.readOnly);
     }),
+  ),
+);
+
+it.effect("reclaims only spare readers idle across two checks and reopens them on demand", () =>
+  withReaderClient(
+    (sql) =>
+      Effect.gen(function* () {
+        const start = startedWorkers.length;
+        const hold = Effect.gen(function* () {
+          const opened = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const fiber = yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                assert.equal(yield* countEntries(sql), 1);
+                yield* Deferred.succeed(opened, undefined);
+                yield* Deferred.await(release);
+                assert.equal(yield* countEntries(sql), 1);
+              }),
+            )
+            .pipe(SqliteClient.readOnly, Effect.forkChild);
+          yield* Deferred.await(opened);
+          return Deferred.succeed(release, undefined).pipe(Effect.andThen(Fiber.join(fiber)));
+        });
+        const [first, second, third, fourth] = yield* Effect.all([hold, hold, hold, hold]);
+        const workers = startedWorkers.slice(start);
+        assert.lengthOf(workers, 4);
+        const retire = workers.map((worker) => vi.spyOn(worker, "terminate"));
+        yield* second;
+        yield* fourth;
+        yield* TestClock.adjust("1 minute");
+        assert.deepEqual(
+          retire.map((spy) => spy.mock.calls.length),
+          [0, 0, 0, 0],
+        );
+        // With the first reader pinned, this borrow makes the second reader warm again.
+        assert.equal(yield* countEntries(sql).pipe(SqliteClient.readOnly), 1);
+        yield* TestClock.adjust("1 minute");
+        assert.deepEqual(
+          retire.map((spy) => spy.mock.calls.length),
+          [0, 0, 0, 1],
+        );
+        yield* first;
+        yield* TestClock.adjust("2 minutes");
+        assert.deepEqual(
+          retire.map((spy) => spy.mock.calls.length),
+          [0, 1, 0, 1],
+        );
+        yield* third;
+        const reopened = yield* Effect.all([hold, hold, hold, hold]);
+        assert.equal(startedWorkers.length - start, 6);
+        yield* Effect.all(reopened);
+      }),
+    true,
   ),
 );
 

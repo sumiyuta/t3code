@@ -6,6 +6,7 @@ import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlError from "effect/sql/SqlError";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { hasPendingMigrations, runMigrations } from "./Migrations.ts";
@@ -111,6 +112,7 @@ const makeLayerFromPath = <E, R>(makeSetup: (dbPath: string) => Layer.Layer<neve
       NodeSqliteClient.layer({
         filename: dbPath,
         readerWorker: true,
+        reclaimIdleReaders: (yield* HostProcess.Platform) === "darwin",
         // A slow disk then delays writes instead of freezing every client.
         writerWorker: true,
         spanAttributes: {
