@@ -99,7 +99,7 @@ const layerDesktopEnvironment = Layer.unwrap(
     const processArch = yield* HostProcess.Architecture;
     return DesktopEnvironment.layer({
       dirname: __dirname,
-      homeDirectory: NodeOS.homedir(),
+      homeDirectory: (yield* HostProcess.Environment).T3CODE_FORK_PROVIDER_HOME ?? NodeOS.homedir(),
       platform,
       processArch,
       ...metadata,

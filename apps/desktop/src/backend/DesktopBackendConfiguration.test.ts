@@ -223,6 +223,22 @@ const withPackagedWslHarness = <A, E, R>(
   }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 describe("DesktopBackendConfiguration", () => {
+  it.effect("keeps provider discovery in the dedicated HOME while the GUI uses the OS HOME", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const start = yield* configuration.resolvePrimary;
+        assert.equal(start.env.HOME, "/fork/providers");
+        assert.equal(start.env.ZDOTDIR, "/fork/providers");
+      }),
+    ).pipe(
+      Effect.provideService(HostProcess.Environment, {
+        HOME: "/owner",
+        T3CODE_FORK_PROVIDER_HOME: "/fork/providers",
+      }),
+    ),
+  );
+
   it.effect("resolvePrimary produces a stable scoped bootstrap token", () =>
     withHarness(
       Effect.gen(function* () {

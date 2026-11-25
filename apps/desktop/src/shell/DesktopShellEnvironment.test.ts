@@ -83,6 +83,17 @@ function makeSlowProcess(
   });
 }
 
+it.effect("does not load owner shell profiles for the isolated fork", () =>
+  runShellEnvironment({
+    env: { HOME: "/owner", PATH: "/usr/bin:/bin", T3CODE_FORK_PROVIDER_HOME: "/fork/providers" },
+    platform: "darwin",
+    userShell: "/bin/zsh",
+    handler: () => {
+      throw new Error("Owner shell profile must not execute");
+    },
+  }).pipe(Effect.map((prepared) => assert.isTrue(prepared))),
+);
+
 function makeHungProcess(): ChildProcessSpawner.ChildProcessHandle {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(124),

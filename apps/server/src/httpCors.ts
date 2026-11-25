@@ -13,7 +13,7 @@ export const browserApiCorsAllowedHeaders = [
 export const DESKTOP_RENDERER_ORIGINS = [
   "t3code://app",
   "t3code-dev://app",
-  "t3code-sumiya://app",
+  "t3code-fork://app",
 ] as const;
 
 /** MCP refuses every browser Origin with 403, so the browser CORS layer must not answer for it. */

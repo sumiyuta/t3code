@@ -111,14 +111,14 @@ export default defineConfig({
       outExtensions: () => ({ js: ".cjs" }),
       entry: [
         "src/boot.ts",
-        "src/sumiyaEnvironment.ts",
+        "src/forkEnvironment.ts",
         "src/compileCache.ts",
         "src/serverCompileCache.ts",
       ],
       clean: false,
       deps: {
         neverBundle: (id) =>
-          id === "./main.cjs" || id === "./compileCache.cjs" || id === "./sumiyaEnvironment.cjs",
+          id === "./main.cjs" || id === "./compileCache.cjs" || id === "./forkEnvironment.cjs",
       },
     },
     {

@@ -124,8 +124,15 @@ const nodeBinDirOf = (nodePath: string): string => {
   return lastSlash > 0 ? nodePath.slice(0, lastSlash) : "/usr/bin";
 };
 
-const backendChildEnvPatch = (): Record<string, string | undefined> =>
-  Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined]));
+const backendChildEnvPatch = (env: NodeJS.ProcessEnv): Record<string, string | undefined> => ({
+  ...Object.fromEntries(DESKTOP_BACKEND_ENV_NAMES.map((name) => [name, undefined])),
+  ...(env.T3CODE_FORK_PROVIDER_HOME
+    ? {
+        HOME: env.T3CODE_FORK_PROVIDER_HOME,
+        ZDOTDIR: env.T3CODE_FORK_PROVIDER_HOME,
+      }
+    : {}),
+});
 
 const getWslEnvEntryName = (entry: string): string => {
   const slashIndex = entry.indexOf("/");
@@ -566,7 +573,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       entryPath: environment.backendEntryPath,
       cwd: environment.backendCwd,
       env: {
-        ...backendChildEnvPatch(),
+        ...backendChildEnvPatch(yield* HostProcess.Environment),
         ELECTRON_RUN_AS_NODE: "1",
         T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1",
         T3CODE_CLI_PATH: Option.getOrUndefined(input.cliPath),
@@ -691,7 +698,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     cwd: environment.backendCwd,
     env: {
       ...parentEnvWithoutT3Home,
-      ...backendChildEnvPatch(),
+      ...backendChildEnvPatch(env),
       ...forwardedEnv,
       ...(wslEnv !== undefined ? { WSLENV: wslEnv } : {}),
     },

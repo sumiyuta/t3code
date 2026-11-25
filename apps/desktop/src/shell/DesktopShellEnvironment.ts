@@ -626,6 +626,9 @@ const installShellEnvironment = (
   never,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
 > => {
+  if (config.env.T3CODE_FORK_PROVIDER_HOME) {
+    return Effect.succeed({ prepared: true, fromUserShell: true });
+  }
   if (config.platform === "win32") {
     return installWindowsEnvironment(config).pipe(
       Effect.map((prepared) => ({ prepared, fromUserShell: prepared })),
