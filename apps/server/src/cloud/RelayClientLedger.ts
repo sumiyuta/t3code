@@ -74,6 +74,8 @@ export const make = Effect.fn("RelayClientLedger.make")(function* (input: {
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const platform = yield* HostProcess.Platform;
+  const forkIsolation =
+    (yield* HostProcess.Environment).T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED === "false";
   const directory = path.join(input.stateDir, ENTRY_DIRECTORY);
   const recordable = platform === "linux" || platform === "darwin";
 
@@ -121,8 +123,14 @@ export const make = Effect.fn("RelayClientLedger.make")(function* (input: {
 
   const observe = (pid: number): Effect.Effect<ObservedProcess | undefined> => {
     if (platform === "linux") return observeLinux(pid).pipe(Effect.orElseSucceed(() => undefined));
-    if (platform === "darwin")
-      return observeDarwin(pid).pipe(Effect.orElseSucceed(() => undefined));
+    if (platform === "darwin") {
+      const observation = observeDarwin(pid);
+      // macOS refuses the platform ps binary inside a sandbox, even with process-exec allowed.
+      // Unknown identity must prevent cleanup from signaling a possibly unrelated process.
+      return forkIsolation
+        ? observation.pipe(Effect.catchCause(() => Effect.undefined))
+        : observation.pipe(Effect.orElseSucceed(() => undefined));
+    }
     return Effect.undefined;
   };
 

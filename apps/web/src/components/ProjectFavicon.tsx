@@ -12,6 +12,7 @@ import { deriveProjectIdentity } from "../projectIdentity";
 import { projectIconColorClassName } from "../projectIconColors";
 import { ProjectMonogram } from "./ProjectMonogram";
 import { cn } from "~/lib/utils";
+import { isForkDesktop } from "../env";
 
 // All lucide icons load as one chunk, only once a project uses a lucide override.
 const LucideProjectIcon = lazy(() =>
@@ -74,7 +75,16 @@ export function ProjectFavicon(input: {
       </span>
     );
   }
-  return <AutomaticProjectFavicon {...input} />;
+  // Sidebar icons must not inspect a checkout just because its history was imported.
+  return isForkDesktop ? (
+    <ProjectFaviconFallback
+      className={input.className}
+      icon={input.fallbackIcon ?? FolderCodeIcon}
+      projectName={project.title}
+    />
+  ) : (
+    <AutomaticProjectFavicon {...input} />
+  );
 }
 
 function AutomaticProjectFavicon(input: Parameters<typeof ProjectFavicon>[0]) {

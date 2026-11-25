@@ -8,6 +8,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as RelayClientLedger from "./RelayClientLedger.ts";
 
@@ -56,6 +57,30 @@ describe.each(observedPlatforms)("RelayClientLedger observing as %s", (platform)
       Effect.provideService(HostProcess.Platform, platform),
       Effect.provide(NodeServices.layer),
     );
+
+  it.live("keeps process identity unknown when Fork sandbox rejects ps", () =>
+    run(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-ps-denied-" });
+        const ledger = yield* RelayClientLedger.make({ stateDir }).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED: "false",
+          }),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, {
+            ...spawner,
+            string: () => Effect.die({ code: "EPERM" }),
+          }),
+        );
+        const untrack = yield* ledger.track(process.pid);
+        yield* ledger.reapOrphans;
+        yield* untrack;
+        expect(isAlive(process.pid)).toBe(true);
+        expect(yield* entryNames(stateDir)).toEqual([]);
+      }).pipe(Effect.provideService(HostProcess.Platform, "darwin")),
+    ),
+  );
 
   it.live("stops a client left by a dead server and keeps one whose server still runs", () =>
     run(

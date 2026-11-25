@@ -5,7 +5,14 @@ export function forkEnvironment(
   inherited: NodeJS.ProcessEnv,
   ownerHome: string,
 ): NodeJS.ProcessEnv {
-  const root = NodePath.join(ownerHome, ".t3-fork");
+  const profile = inherited.T3CODE_FORK_PROFILE_NAME;
+  if (profile !== undefined && !/^synthetic-[a-z0-9-]{1,48}$/.test(profile)) {
+    throw new Error("Invalid synthetic Fork profile name");
+  }
+  const root =
+    profile === undefined
+      ? NodePath.join(ownerHome, ".t3-fork")
+      : NodePath.join(ownerHome, ".t3-fork", "profiles", profile);
   const home = NodePath.join(root, "provider-home");
   const environment: NodeJS.ProcessEnv = {};
   for (const key of ["TMPDIR", "LANG", "LC_CTYPE", "__CF_USER_TEXT_ENCODING"]) {
@@ -13,6 +20,7 @@ export function forkEnvironment(
   }
   return {
     ...environment,
+    ...(profile === undefined ? {} : { T3CODE_FORK_PROFILE_NAME: profile }),
     HOME: ownerHome,
     ZDOTDIR: home,
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",

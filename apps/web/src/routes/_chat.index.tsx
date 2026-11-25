@@ -5,7 +5,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { T, useGT } from "gt-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
-import { isElectron } from "../env";
+import { isElectron, isForkDesktop } from "../env";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
@@ -31,7 +31,8 @@ function ChatIndexRouteView() {
     if (environments.length === 0) return <HostedEmptyState />;
   }
 
-  return <IndexDraftLanding />;
+  // Opening the catalog must not implicitly open a repository or subscribe to VCS.
+  return isForkDesktop ? <NoProjectsHero /> : <IndexDraftLanding />;
 }
 
 function IndexDraftLanding() {

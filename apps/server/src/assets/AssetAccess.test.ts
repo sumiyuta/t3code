@@ -128,6 +128,46 @@ const layerTest = Layer.mergeAll(
 ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 describe("AssetAccess", () => {
+  it.effect("rejects Fork favicon paths before workspace normalization or file inspection", () =>
+    Effect.gen(function* () {
+      const paths = yield* WorkspacePaths.WorkspacePaths;
+      const result = yield* issueAssetUrl({
+        resource: { _tag: "project-favicon", cwd: "/forbidden/synthetic-project" },
+      }).pipe(
+        Effect.provideService(HostProcess.Environment, {
+          T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED: "false",
+        }),
+        Effect.provideService(WorkspacePaths.WorkspacePaths, {
+          ...paths,
+          normalizeWorkspaceRoot: () => Effect.die("Forbidden workspace access"),
+        }),
+        Effect.flip,
+      );
+      expect(result._tag).toBe("AssetProjectFaviconNotFoundError");
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("does not read a cached favicon capability in Fork", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-cached-icon-" });
+      yield* fs.writeFileString(path.join(root, "favicon.svg"), "<svg/>");
+      const issued = yield* issueAssetUrl({ resource: { _tag: "project-favicon", cwd: root } });
+      const suffix = issued.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const index = suffix.indexOf("/");
+      const asset = yield* resolveAsset(suffix.slice(0, index), suffix.slice(index + 1)).pipe(
+        Effect.provideService(HostProcess.Environment, {
+          T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED: "false",
+        }),
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          realPath: () => Effect.die("Forbidden cached favicon access"),
+        }),
+      );
+      expect(asset).toBeNull();
+    }).pipe(Effect.provide(layerTest)),
+  );
   describe("readMcpAppHtml", () => {
     it.effect("accepts snapshots at the stored HTML byte limit", () =>
       Effect.gen(function* () {

@@ -588,6 +588,12 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   /** Where a cloned project's checkout stands, while the clone tracker still knows it. */
   readonly projectCheckout?: "pending" | "cloned";
 }) {
+  if (
+    input.resource._tag === "project-favicon" &&
+    (yield* HostProcess.Environment).T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED === "false"
+  ) {
+    return yield* new AssetProjectFaviconNotFoundError({ resource: input.resource });
+  }
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
@@ -958,6 +964,11 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
 
   const claims = decodeClaims(encodedPayload);
   if (!claims || claims.expiresAt <= (yield* Clock.currentTimeMillis)) return null;
+  if (
+    (claims.kind === "project-favicon" || claims.kind === "project-favicon-external") &&
+    (yield* HostProcess.Environment).T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED === "false"
+  )
+    return null;
 
   if (claims.kind === "attachment") {
     const config = yield* ServerConfig.ServerConfig;

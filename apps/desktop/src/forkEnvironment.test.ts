@@ -35,3 +35,14 @@ it("isolates fork data, provider homes, port and telemetry from the owner's envi
   assert.notInclude(environment.PATH!, "/owner/bin");
   assert.deepStrictEqual(forkEnvironment(environment, environment.HOME!), environment);
 });
+
+it("keeps synthetic GUI profiles separate and rejects path traversal", () => {
+  const env = forkEnvironment({ T3CODE_FORK_PROFILE_NAME: "synthetic-no-io" }, "/owner");
+  assert.equal(env.T3CODE_HOME, "/owner/.t3-fork/profiles/synthetic-no-io/data");
+  assert.equal(
+    env.T3CODE_DESKTOP_APP_DATA_DIR,
+    "/owner/.t3-fork/profiles/synthetic-no-io/electron",
+  );
+  assert.deepStrictEqual(forkEnvironment(env, "/owner"), env);
+  assert.throws(() => forkEnvironment({ T3CODE_FORK_PROFILE_NAME: "../../.t3" }, "/owner"));
+});
