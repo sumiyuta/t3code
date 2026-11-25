@@ -30,4 +30,5 @@ it("isolates fork data, provider homes, port and telemetry from the owner's envi
   assert.isUndefined(environment.ANTHROPIC_AUTH_TOKEN);
   assert.isUndefined(environment.SSH_AUTH_SOCK);
   assert.notInclude(environment.PATH!, "/owner/bin");
+  assert.deepStrictEqual(sumiyaEnvironment(environment, environment.HOME!), environment);
 });

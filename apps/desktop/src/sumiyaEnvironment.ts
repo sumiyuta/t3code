@@ -5,7 +5,10 @@ export function sumiyaEnvironment(
   inherited: NodeJS.ProcessEnv,
   ownerHome: string,
 ): NodeJS.ProcessEnv {
-  const home = NodePath.join(ownerHome, ".t3-sumiya-home");
+  const home =
+    NodePath.basename(ownerHome) === ".t3-sumiya-home"
+      ? ownerHome
+      : NodePath.join(ownerHome, ".t3-sumiya-home");
   const environment: NodeJS.ProcessEnv = {};
   for (const key of ["TMPDIR", "LANG", "LC_CTYPE", "__CF_USER_TEXT_ENCODING"]) {
     if (inherited[key] !== undefined) environment[key] = inherited[key];
