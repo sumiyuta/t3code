@@ -125,6 +125,34 @@ describe.each(observedPlatforms)("OpenCodeServerLedger observing as %s", (platfo
       Effect.provide(NodeServices.layer),
     );
 
+  it.live("does not identify or stop a process when Fork sandbox rejects ps", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-opencode-denied-" });
+      const ledger = yield* OpenCodeServerLedger.make({ stateDir }).pipe(
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
+          T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED: "false",
+        }),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, {
+          ...spawner,
+          string: () => Effect.die({ code: "EPERM" }),
+        }),
+      );
+      const forget = yield* ledger.track({ pid: process.pid, port: 4096, args: [] });
+      yield* ledger.reapOrphans;
+      yield* forget;
+      expect(process.kill(process.pid, 0)).toBe(true);
+      expect(
+        yield* fs
+          .readDirectory(path.join(stateDir, "opencode-servers"))
+          .pipe(Effect.orElseSucceed(() => [])),
+      ).toEqual([]);
+    }).pipe(Effect.scoped, provideHost),
+  );
+
   it.live("stops an OpenCode server group left by a server that died", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

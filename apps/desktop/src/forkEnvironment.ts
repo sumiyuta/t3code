@@ -20,7 +20,12 @@ export function forkEnvironment(
   }
   return {
     ...environment,
-    ...(profile === undefined ? {} : { T3CODE_FORK_PROFILE_NAME: profile }),
+    ...(profile === undefined
+      ? {}
+      : {
+          T3CODE_FORK_PROFILE_NAME: profile,
+          T3CODE_FORK_BACKEND_SANDBOX: NodePath.join(root, "workspace-sandbox.sb"),
+        }),
     HOME: ownerHome,
     ZDOTDIR: home,
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",

@@ -290,6 +290,28 @@ describe("DesktopBackendConfiguration", () => {
     ),
   );
 
+  it.effect("wraps only an explicit synthetic Fork backend in its OS sandbox", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const config = yield* configuration.resolvePrimary;
+        assert.equal(config.executablePath, "/usr/bin/sandbox-exec");
+        assert.deepEqual(config.args.slice(0, 3), [
+          "-f",
+          "/synthetic/workspace-sandbox.sb",
+          process.execPath,
+        ]);
+        assert.equal(config.env.ELECTRON_RUN_AS_NODE, "1");
+        assert.equal(config.bootstrapDelivery, "fd3");
+      }).pipe(
+        Effect.provideService(HostProcess.Environment, {
+          T3CODE_FORK_PROFILE_NAME: "synthetic-test",
+          T3CODE_FORK_BACKEND_SANDBOX: "/synthetic/workspace-sandbox.sb",
+        }),
+      ),
+    ),
+  );
+
   it.effect("resolvePrimary starts from server.asar without materializing the WSL tree", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

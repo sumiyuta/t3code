@@ -102,6 +102,8 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const platform = yield* HostProcess.Platform;
+  const forkIsolation =
+    (yield* HostProcess.Environment).T3CODE_FORK_PROJECT_ENRICHMENT_ENABLED === "false";
   const directory = path.join(input.stateDir, ENTRY_DIRECTORY);
   const recordable = platform === "linux" || platform === "darwin";
 
@@ -145,10 +147,12 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
   const observe = (pid: number): Effect.Effect<ObservedProcess | undefined> => {
     if (platform === "linux") return observeLinux(pid).pipe(Effect.orElseSucceed(() => undefined));
     if (platform === "darwin") {
-      return psDarwin(["-p", String(pid)]).pipe(
+      const observation = psDarwin(["-p", String(pid)]).pipe(
         Effect.map((found) => found.find((candidate) => candidate.pid === pid)),
-        Effect.orElseSucceed(() => undefined),
       );
+      return forkIsolation
+        ? observation.pipe(Effect.catchCause(() => Effect.undefined))
+        : observation.pipe(Effect.orElseSucceed(() => undefined));
     }
     return Effect.undefined;
   };
@@ -168,10 +172,13 @@ export const make = Effect.fn("OpenCodeServerLedger.make")(function* (input: {
       );
     }
     if (platform === "darwin") {
-      return psDarwin(["-A"]).pipe(
+      const observation = psDarwin(["-A"]).pipe(
         Effect.map((found) => found.filter((candidate) => candidate.pgid === pgid)),
-        Effect.orElseSucceed(() => []),
       );
+      const noProcesses = Effect.succeed<ReadonlyArray<ObservedProcess>>([]);
+      return forkIsolation
+        ? observation.pipe(Effect.catchCause(() => noProcesses))
+        : observation.pipe(Effect.orElseSucceed(() => []));
     }
     return Effect.succeed([]);
   };

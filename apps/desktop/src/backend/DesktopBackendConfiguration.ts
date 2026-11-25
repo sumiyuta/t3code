@@ -561,10 +561,17 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       ...buildObservabilityFragment(input.observabilitySettings),
     };
 
+    const hostEnv = yield* HostProcess.Environment;
+    const sandbox =
+      environment.platform === "darwin" &&
+      hostEnv.T3CODE_FORK_PROFILE_NAME?.startsWith("synthetic-")
+        ? hostEnv.T3CODE_FORK_BACKEND_SANDBOX
+        : undefined;
     return {
-      executablePath: process.execPath,
+      executablePath: sandbox === undefined ? process.execPath : "/usr/bin/sandbox-exec",
       // Packaged builds have a separate cache; --require prevents cache settings leaking to provider subprocesses.
       args: [
+        ...(sandbox === undefined ? [] : ["-f", sandbox, process.execPath]),
         ...(environment.isPackaged ? ["--require", environment.compileCachePath] : []),
         environment.backendEntryPath,
         "--bootstrap-fd",
